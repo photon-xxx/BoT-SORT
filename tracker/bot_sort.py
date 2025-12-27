@@ -29,10 +29,10 @@ class STrack(BaseTrack):
         self.curr_feat = None
         if feat is not None:
             self.update_features(feat)
-        self.features = deque([], maxlen=feat_history)
+        self.features = deque([], maxlen=feat_history)  # 历史特征
         self.alpha = 0.9
 
-    def update_features(self, feat):
+    def update_features(self, feat):    #当前特征和平滑特征的更新
         feat /= np.linalg.norm(feat)
         self.curr_feat = feat
         if self.smooth_feat is None:
@@ -202,21 +202,21 @@ class STrack(BaseTrack):
 class BoTSORT(object):
     def __init__(self, args, frame_rate=30):
 
-        self.tracked_stracks = []  # type: list[STrack]
-        self.lost_stracks = []  # type: list[STrack]
-        self.removed_stracks = []  # type: list[STrack]
+        self.tracked_stracks = []  # type: list[STrack] # 处于追踪状态的轨迹列表
+        self.lost_stracks = []  # type: list[STrack]    # 处于丢失状态（但未移除）的轨迹列表
+        self.removed_stracks = []  # type: list[STrack] # 已移除的轨迹列表
         BaseTrack.clear_count()
 
         self.frame_id = 0
         self.args = args
 
-        self.track_high_thresh = args.track_high_thresh
-        self.track_low_thresh = args.track_low_thresh
-        self.new_track_thresh = args.new_track_thresh
+        self.track_high_thresh = args.track_high_thresh # 高分检测框阈值
+        self.track_low_thresh = args.track_low_thresh   # 低分检测框阈值
+        self.new_track_thresh = args.new_track_thresh   # 新轨迹初始化阈值
 
-        self.buffer_size = int(frame_rate / 30.0 * args.track_buffer)
+        self.buffer_size = int(frame_rate / 30.0 * args.track_buffer) # 轨迹保留缓冲帧数
         self.max_time_lost = self.buffer_size
-        self.kalman_filter = KalmanFilter()
+        self.kalman_filter = KalmanFilter() # 卡尔曼滤波器
 
         # ReID module
         self.proximity_thresh = args.proximity_thresh
@@ -225,9 +225,19 @@ class BoTSORT(object):
         if args.with_reid:
             self.encoder = FastReIDInterface(args.fast_reid_config, args.fast_reid_weights, args.device)
 
-        self.gmc = GMC(method=args.cmc_method, verbose=[args.name, args.ablation])
+        self.gmc = GMC(method=args.cmc_method, verbose=[args.name, args.ablation]) # 全局运动补偿 (GMC) 模块
 
     def update(self, output_results, img):
+        """
+        BoT-SORT 的核心更新步骤，处理每一帧的检测结果并更新轨迹状态。
+        
+        Args:
+            output_results: 当前帧的检测结果，通常为 [[x1, y1, x2, y2, score, class], ...]
+            img: 当前帧的图像，用于 GMC 和 ReID 特征提取
+            
+        Returns:
+            output_stracks: 当前帧最终输出的轨迹列表
+        """
         self.frame_id += 1
         activated_starcks = []
         refind_stracks = []
@@ -245,12 +255,14 @@ class BoTSORT(object):
                 classes = output_results[:, -1]
 
             # Remove bad detections
+            # 过滤掉低于最低阈值的检测框
             lowest_inds = scores > self.track_low_thresh
             bboxes = bboxes[lowest_inds]
             scores = scores[lowest_inds]
             classes = classes[lowest_inds]
 
             # Find high threshold detections
+            # 分离出高分检测框 (dets) 和低分检测框 (dets_second)
             remain_inds = scores > self.args.track_high_thresh
             dets = bboxes[remain_inds]
             scores_keep = scores[remain_inds]
@@ -265,11 +277,13 @@ class BoTSORT(object):
             classes_keep = []
 
         '''Extract embeddings '''
+        # 如果启用 ReID，提取高分检测框的外观特征
         if self.args.with_reid:
             features_keep = self.encoder.inference(img, dets)
 
         if len(dets) > 0:
             '''Detections'''
+            # 将高分检测框封装为 STrack 对象
             if self.args.with_reid:
                 detections = [STrack(STrack.tlbr_to_tlwh(tlbr), s, f) for
                               (tlbr, s, f) in zip(dets, scores_keep, features_keep)]
@@ -282,6 +296,7 @@ class BoTSORT(object):
         ''' Add newly detected tracklets to tracked_stracks'''
         unconfirmed = []
         tracked_stracks = []  # type: list[STrack]
+        # 将当前追踪列表中的轨迹分为“已确认”和“未确认”
         for track in self.tracked_stracks:
             if not track.is_activated:
                 unconfirmed.append(track)
@@ -289,17 +304,22 @@ class BoTSORT(object):
                 tracked_stracks.append(track)
 
         ''' Step 2: First association, with high score detection boxes'''
+        # 步骤 2: 第一轮匹配，使用高分检测框
+        # 将“正在追踪”和“丢失”的轨迹合并为候选池
         strack_pool = joint_stracks(tracked_stracks, self.lost_stracks)
 
         # Predict the current location with KF
+        # 使用卡尔曼滤波预测候选轨迹在当前帧的位置
         STrack.multi_predict(strack_pool)
 
         # Fix camera motion
+        # 计算全局运动补偿 (GMC)，并应用到预测结果上
         warp = self.gmc.apply(img, dets)
         STrack.multi_gmc(strack_pool, warp)
         STrack.multi_gmc(unconfirmed, warp)
 
         # Associate with high score detection boxes
+        # 计算 IoU 距离和 Embedding 距离
         ious_dists = matching.iou_distance(strack_pool, detections)
         ious_dists_mask = (ious_dists > self.proximity_thresh)
 
@@ -311,7 +331,7 @@ class BoTSORT(object):
             raw_emb_dists = emb_dists.copy()
             emb_dists[emb_dists > self.appearance_thresh] = 1.0
             emb_dists[ious_dists_mask] = 1.0
-            dists = np.minimum(ious_dists, emb_dists)
+            dists = np.minimum(ious_dists, emb_dists) # 融合 IoU 和 ReID 距离
 
             # Popular ReID method (JDE / FairMOT)
             # raw_emb_dists = matching.embedding_distance(strack_pool, detections)
@@ -324,8 +344,10 @@ class BoTSORT(object):
         else:
             dists = ious_dists
 
+        # 使用线性分配算法 (匈牙利算法) 进行匹配
         matches, u_track, u_detection = matching.linear_assignment(dists, thresh=self.args.match_thresh)
 
+        # 处理匹配成功的轨迹
         for itracked, idet in matches:
             track = strack_pool[itracked]
             det = detections[idet]
@@ -337,6 +359,7 @@ class BoTSORT(object):
                 refind_stracks.append(track)
 
         ''' Step 3: Second association, with low score detection boxes'''
+        # 步骤 3: 第二轮匹配，使用低分检测框 (ByteTrack 核心策略)
         if len(scores):
             inds_high = scores < self.args.track_high_thresh
             inds_low = scores > self.args.track_low_thresh
@@ -357,9 +380,14 @@ class BoTSORT(object):
         else:
             detections_second = []
 
+        # 找出第一轮未匹配上的“正在追踪”的轨迹
         r_tracked_stracks = [strack_pool[i] for i in u_track if strack_pool[i].state == TrackState.Tracked]
+        
+        # 只计算 IoU 距离（低分框不可靠，不使用 ReID）
         dists = matching.iou_distance(r_tracked_stracks, detections_second)
         matches, u_track, u_detection_second = matching.linear_assignment(dists, thresh=0.5)
+        
+        # 处理匹配成功的轨迹
         for itracked, idet in matches:
             track = r_tracked_stracks[itracked]
             det = detections_second[idet]
@@ -370,6 +398,7 @@ class BoTSORT(object):
                 track.re_activate(det, self.frame_id, new_id=False)
                 refind_stracks.append(track)
 
+        # 依然未匹配的轨迹 -> 标记为丢失 (Lost)
         for it in u_track:
             track = r_tracked_stracks[it]
             if not track.state == TrackState.Lost:
@@ -377,6 +406,7 @@ class BoTSORT(object):
                 lost_stracks.append(track)
 
         '''Deal with unconfirmed tracks, usually tracks with only one beginning frame'''
+        # 处理未确认的轨迹 (unconfirmed)，与剩余的高分检测框进行匹配
         detections = [detections[i] for i in u_detection]
         ious_dists = matching.iou_distance(unconfirmed, detections)
         ious_dists_mask = (ious_dists > self.proximity_thresh)
@@ -396,12 +426,15 @@ class BoTSORT(object):
         for itracked, idet in matches:
             unconfirmed[itracked].update(detections[idet], self.frame_id)
             activated_starcks.append(unconfirmed[itracked])
+        # 未能再次匹配的未确认轨迹 -> 移除
         for it in u_unconfirmed:
             track = unconfirmed[it]
             track.mark_removed()
             removed_stracks.append(track)
 
         """ Step 4: Init new stracks"""
+        # 步骤 4: 初始化新轨迹
+        # 对于所有轮次都未匹配上的高分检测框，初始化为新轨迹
         for inew in u_detection:
             track = detections[inew]
             if track.score < self.new_track_thresh:
@@ -411,12 +444,15 @@ class BoTSORT(object):
             activated_starcks.append(track)
 
         """ Step 5: Update state"""
+        # 步骤 5: 更新状态
+        # 检查丢失列表，移除超时的轨迹
         for track in self.lost_stracks:
             if self.frame_id - track.end_frame > self.max_time_lost:
                 track.mark_removed()
                 removed_stracks.append(track)
 
         """ Merge """
+        # 合并并整理所有列表
         self.tracked_stracks = [t for t in self.tracked_stracks if t.state == TrackState.Tracked]
         self.tracked_stracks = joint_stracks(self.tracked_stracks, activated_starcks)
         self.tracked_stracks = joint_stracks(self.tracked_stracks, refind_stracks)
