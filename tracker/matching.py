@@ -1,9 +1,60 @@
 import numpy as np
 import scipy
-import lap
+try:
+    import lap
+except ImportError:
+    try:
+        import lapx as lap
+    except ImportError:
+        print("[BoT-SORT] Warning: 'lap' or 'lapx' not found. Linear assignment may fail.")
+        lap = None
+
 from scipy.spatial.distance import cdist
 
-from cython_bbox import bbox_overlaps as bbox_ious
+try:
+    from cython_bbox import bbox_overlaps as bbox_ious
+except ImportError:
+    print("[BoT-SORT] Warning: 'cython_bbox' not found. Using pure Python fallback (slower but compatible).")
+    
+    def bbox_ious(atlbrs, btlbrs):
+        """
+        Pure Python implementation of bbox_ious.
+        atlbrs: [N, 4] (x1, y1, x2, y2)
+        btlbrs: [M, 4] (x1, y1, x2, y2)
+        Returns: [N, M] iou matrix
+        """
+        atlbrs = np.ascontiguousarray(atlbrs, dtype=float)
+        btlbrs = np.ascontiguousarray(btlbrs, dtype=float)
+        
+        N = atlbrs.shape[0]
+        M = btlbrs.shape[0]
+        
+        ious = np.zeros((N, M), dtype=float)
+        if N == 0 or M == 0:
+            return ious
+            
+        # Broadcast calculation
+        # atlbrs[:, 0] -> (N, 1)
+        # btlbrs[:, 0] -> (1, M)
+        xx1 = np.maximum(atlbrs[:, 0][:, None], btlbrs[:, 0][None, :])
+        yy1 = np.maximum(atlbrs[:, 1][:, None], btlbrs[:, 1][None, :])
+        xx2 = np.minimum(atlbrs[:, 2][:, None], btlbrs[:, 2][None, :])
+        yy2 = np.minimum(atlbrs[:, 3][:, None], btlbrs[:, 3][None, :])
+        
+        w = np.maximum(0.0, xx2 - xx1)
+        h = np.maximum(0.0, yy2 - yy1)
+        inter = w * h
+        
+        area_a = (atlbrs[:, 2] - atlbrs[:, 0]) * (atlbrs[:, 3] - atlbrs[:, 1])
+        area_b = (btlbrs[:, 2] - btlbrs[:, 0]) * (btlbrs[:, 3] - btlbrs[:, 1])
+        
+        union = area_a[:, None] + area_b[None, :] - inter
+        
+        # Avoid division by zero
+        union = np.maximum(union, 1e-6)
+        
+        return inter / union
+
 from tracker import kalman_filter
 
 
@@ -57,13 +108,13 @@ def ious(atlbrs, btlbrs):
 
     :rtype ious np.ndarray
     """
-    ious = np.zeros((len(atlbrs), len(btlbrs)), dtype=np.float)
+    ious = np.zeros((len(atlbrs), len(btlbrs)), dtype=float)
     if ious.size == 0:
         return ious
 
     ious = bbox_ious(
-        np.ascontiguousarray(atlbrs, dtype=np.float),
-        np.ascontiguousarray(btlbrs, dtype=np.float)
+        np.ascontiguousarray(atlbrs, dtype=float),
+        np.ascontiguousarray(btlbrs, dtype=float)
     )
 
     return ious
@@ -133,11 +184,11 @@ def embedding_distance(tracks, detections, metric='cosine'):
     :return: cost_matrix np.ndarray
     """
 
-    cost_matrix = np.zeros((len(tracks), len(detections)), dtype=np.float)
+    cost_matrix = np.zeros((len(tracks), len(detections)), dtype=float)
     if cost_matrix.size == 0:
         return cost_matrix
-    det_features = np.asarray([track.curr_feat for track in detections], dtype=np.float)
-    track_features = np.asarray([track.smooth_feat for track in tracks], dtype=np.float)
+    det_features = np.asarray([track.curr_feat for track in detections], dtype=float)
+    track_features = np.asarray([track.smooth_feat for track in tracks], dtype=float)
 
     cost_matrix = np.maximum(0.0, cdist(track_features, det_features, metric))  # / 2.0  # Nomalized features
     return cost_matrix

@@ -6,7 +6,6 @@
 
 # Modified from: https://github.com/open-mmlab/OpenUnReID/blob/66bb2ae0b00575b80fbe8915f4d4f4739cc21206/openunreid/core/utils/compute_dist.py
 
-
 import faiss
 import numpy as np
 import torch

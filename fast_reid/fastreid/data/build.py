@@ -8,8 +8,15 @@ import logging
 import os
 
 import torch
-from torch._six import string_classes
-from collections import Mapping
+try:
+    from torch._six import string_classes
+except ImportError:
+    string_classes = str
+
+try:
+    from collections.abc import Mapping
+except ImportError:
+    from collections import Mapping
 
 from fast_reid.fastreid.config import configurable
 from fast_reid.fastreid.utils import comm
