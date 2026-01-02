@@ -24,6 +24,9 @@ class STrack(BaseTrack):
 
         self.score = score
         self.tracklet_len = 0
+        self.jersey_number = None # 球衣号码
+        self.position = None # 二维俯视坐标 (x, y)
+        self.iou = 0.0 # 与其他轨迹的最大IoU
 
         self.smooth_feat = None
         self.curr_feat = None
@@ -465,6 +468,18 @@ class BoTSORT(object):
         # output_stracks = [track for track in self.tracked_stracks if track.is_activated]
         output_stracks = [track for track in self.tracked_stracks]
 
+        # Calculate IoU between tracks to detect occlusion
+        if len(output_stracks) > 0:
+            tlbrs = [track.tlbr for track in output_stracks]
+            # Calculate NxN IoU matrix
+            iou_matrix = matching.ious(tlbrs, tlbrs)
+            
+            for i, track in enumerate(output_stracks):
+                # Set diagonal to 0 to ignore self-overlap
+                iou_matrix[i, i] = 0.0
+                # Find max overlap with any other track
+                max_iou = np.max(iou_matrix[i])
+                track.iou = float(max_iou)
 
         return output_stracks
 
