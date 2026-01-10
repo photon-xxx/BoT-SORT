@@ -24,7 +24,7 @@ if __name__ == '__main__':
         else:
             data_path = os.path.join(DATA_PATH, 'train')
         out_path = os.path.join(OUT_PATH, '{}.json'.format(split))
-        out = {'images': [], 'annotations': [], 'videos': [],
+        out = {'images': [], 'annotations': [], 'videos: [],
                'categories': [{'id': 1, 'name': 'pedestrian'}]}
         seqs = os.listdir(data_path)
         image_cnt = 0
@@ -36,7 +36,7 @@ if __name__ == '__main__':
             if '.DS_Store' in seq:
                 continue
             video_cnt += 1  # video sequence number.
-            out['videos'].append({'id': video_cnt, 'file_name': seq})
+            out['videos].append({'id': video_cnt, 'file_name': seq})
             seq_path = os.path.join(data_path, seq)
             img_path = os.path.join(seq_path, 'img1')
             ann_path = os.path.join(seq_path, 'gt/gt.txt')

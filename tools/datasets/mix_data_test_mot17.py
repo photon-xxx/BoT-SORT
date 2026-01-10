@@ -27,7 +27,7 @@ ann_list = list()
 for ann in mot_json['annotations']:
     ann_list.append(ann)
 
-video_list = mot_json['videos']
+video_list = mot_json['videos]
 category_list = mot_json['categories']
 
 
@@ -146,6 +146,6 @@ video_list.append({
 mix_json = dict()
 mix_json['images'] = img_list
 mix_json['annotations'] = ann_list
-mix_json['videos'] = video_list
+mix_json['videos] = video_list
 mix_json['categories'] = category_list
 json.dump(mix_json, open('datasets/mix_det/annotations/train.json','w'))
